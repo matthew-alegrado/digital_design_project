@@ -50,7 +50,7 @@ assign wt = w[i];
 // Function to determine number of blocks in memory to fetch
 function logic [15:0] determine_num_blocks(input logic [31:0] size);
 
-  determine_num_blocks = (size + 65) >> 9;
+  determine_num_blocks = ((((size << 5) + 65) & 9'b1) != 0) + ((size << 5) + 65) >> 9;
 
 endfunction
 
@@ -123,7 +123,9 @@ begin
 			cur_we <= 0;
 			curr_block <= 0;
 			state <= READ;
-       end
+       end else begin
+			state <= IDLE;
+		 end
     end
 	 
 	 READ: begin
@@ -142,9 +144,10 @@ begin
     BLOCK: begin
 	// Fetch message in 512-bit block size
 	// For each of 512-bit block initiate hash value computation
-			if (curr_block == num_blocks)
+			if (curr_block == num_blocks) begin
+				offset <= 0;
 				state <= WRITE;
-			else begin
+			end else begin
 				for (int l = 0; l < 16; l++) begin
 					if ((curr_block << 4) + l >= NUM_OF_WORDS) begin
 						if (l == 15)
@@ -209,37 +212,39 @@ begin
     // h0 to h7 after compute stage has final computed hash value
     // write back these h0 to h7 to memory starting from output_addr
     WRITE: begin
-        for (int k = 0; k < 8; k++) begin
-            cur_addr <= output_addr;
-				offset <= k;
-            case(k)
-                0: begin
-                    cur_write_data <= h0;
-                end
-                1: begin
-                    cur_write_data <= h1;
-                end
-                2: begin
-                    cur_write_data <= h2;
-                end
-                3: begin
-                    cur_write_data <= h3;
-                end
-                4: begin
-                    cur_write_data <= h4;
-                end
-                5: begin
-                    cur_write_data <= h5;
-                end
-                6: begin
-                    cur_write_data <= h6;
-                end
-                default: begin
-                    cur_write_data <= h7;
-                end
-            endcase
-        end
-        state <= IDLE;
+			cur_addr <= output_addr;
+			cur_we <= 1;
+         case(offset)
+             0: begin
+                 cur_write_data <= h0;
+             end
+             1: begin
+                 cur_write_data <= h1;
+             end
+             2: begin
+                 cur_write_data <= h2;
+             end
+             3: begin
+                 cur_write_data <= h3;
+             end
+             4: begin
+                 cur_write_data <= h4;
+             end
+             5: begin
+                 cur_write_data <= h5;
+             end
+             6: begin
+                 cur_write_data <= h6;
+             end
+             default: begin
+                 cur_write_data <= h7;
+             end
+         endcase
+			if (offset < 7) begin
+				state <= COMPUTE;
+				offset <= offset + 1;
+			end
+			state <= IDLE;
     end
 	 endcase
   end
