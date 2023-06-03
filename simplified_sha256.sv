@@ -14,8 +14,8 @@ enum logic [2:0] {IDLE, READ, BLOCK, COMPUTE, WRITE} state;
 // or modify these variables. Code below is more as a reference.
 
 // Local variables
-logic [31:0] w[64];
-logic [31:0] message[20];
+logic [31:0] w[63:0];
+logic [31:0] message[19:0];
 logic [31:0] wt;
 logic [31:0] h0, h1, h2, h3, h4, h5, h6, h7;
 logic [31:0] a, b, c, d, e, f, g, h;
@@ -49,8 +49,11 @@ assign wt = w[i];
 // Note : Function defined are for reference purpose. Feel free to add more functions or modify below.
 // Function to determine number of blocks in memory to fetch
 function logic [15:0] determine_num_blocks(input logic [31:0] size);
-
-  determine_num_blocks = ((((size << 5) + 65) & 9'b1) != 0) + ((size << 5) + 65) >> 9;
+	
+	if ((((size << 5) + 65) & 9'b1) == 0)
+		determine_num_blocks = ((size << 5) + 65) >> 9;
+	else
+		determine_num_blocks = 1+(((size << 5) + 65) >> 9);
 
 endfunction
 
@@ -77,6 +80,8 @@ endfunction
 // for reading from memory to get original message
 // for writing final computed has value
 assign mem_clk = clk;
+logic[31:0] test;
+assign test = message[0];
 assign mem_addr = cur_addr + offset;
 assign mem_we = cur_we;
 assign mem_write_data = cur_write_data;
@@ -109,6 +114,7 @@ begin
   else case (state)
     // Initialize hash values h0 to h7 and a to h, other variables and memory we, address offset, etc
     IDLE: begin 
+		 cur_we <= 0;
        if(start) begin
 			h0 <= 32'h6a09e667;
 			h1 <= 32'hbb67ae85;
@@ -120,7 +126,6 @@ begin
 			h7 <= 32'h5be0cd19;
 			cur_addr <= message_addr;
 			offset <= 0;
-			cur_we <= 0;
 			curr_block <= 0;
 			state <= READ;
        end else begin
@@ -128,12 +133,11 @@ begin
 		 end
     end
 	 
-	 READ: begin
-        if (offset == 0) begin
-            cur_addr <= message_addr;
-        end
-        message[offset] <= mem_read_data;
-        offset <= offset + 1;
+	 READ: begin //delay by 1 cycle because memory read is delayed by 1 cycle
+		  if (offset > 0) begin
+			  message[offset-1] <= mem_read_data;
+		  end
+		  offset <= offset + 1;
         if (offset == NUM_OF_WORDS) state <= BLOCK;
         else state <= READ;
      end
@@ -145,7 +149,7 @@ begin
 	// Fetch message in 512-bit block size
 	// For each of 512-bit block initiate hash value computation
 			if (curr_block == num_blocks) begin
-				offset <= 0;
+				j <= 0;
 				state <= WRITE;
 			end else begin
 				for (int l = 0; l < 16; l++) begin
@@ -161,14 +165,14 @@ begin
 					end else
 						w[l] <= message[(curr_block << 4) + l];
 				end
-				a = h0;
-				b = h1;
-				c = h2;
-				d = h3;
-				e = h4;
-				f = h5;
-				g = h6;
-				h = h7;
+				a <= h0;
+				b <= h1;
+				c <= h2;
+				d <= h3;
+				e <= h4;
+				f <= h5;
+				g <= h6;
+				h <= h7;
 				i <= 0;
 				state <= COMPUTE;
 			end
@@ -180,29 +184,22 @@ begin
     // move to WRITE stage
     COMPUTE: begin
 	// 64 processing rounds steps for 512-bit block 
-        if (i <= 64) begin
+        if (i < 64) begin
 			if (i < 48) begin
 				w[i+16] <= w[i] + (rightrotate(w[i+1],7) ^ rightrotate(w[i+1],18) ^ (w[i+1] >> 3)) + w[i+9] + (rightrotate(w[i+14],17) ^ rightrotate(w[i+14],19) ^ (w[i+14] >> 10));
 			end
-			a <= sha256_op(a,b,c,d,e,f,g,h,wt,i);
-			b <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 32;
-			c <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 64;
-			d <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 96;
-			e <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 128;
-			f <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 160;
-			g <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 192;
-			h <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 224;
-
-
-
-
-
-
-
-
+			{a,b,c,d,e,f,g,h} <= sha256_op(a,b,c,d,e,f,g,h,wt,i);
 			i <= i + 1;
 			state <= COMPUTE;
         end else begin
+			h0 <= h0 + a;
+			h1 <= h1 + b;
+			h2 <= h2 + c;
+			h3 <= h3 + d;
+			h4 <= h4 + e;
+			h5 <= h5 + f;
+			h6 <= h6 + g;
+			h7 <= h7 + h;
 			curr_block <= curr_block + 1;
          state <= BLOCK;
 		  end
@@ -213,8 +210,8 @@ begin
     // write back these h0 to h7 to memory starting from output_addr
     WRITE: begin
 			cur_addr <= output_addr;
-			cur_we <= 1;
-         case(offset)
+			cur_we <= (j < 8);
+         case(j)
              0: begin
                  cur_write_data <= h0;
              end
@@ -240,11 +237,13 @@ begin
                  cur_write_data <= h7;
              end
          endcase
-			if (offset < 7) begin
-				state <= COMPUTE;
-				offset <= offset + 1;
+			if (j < 8) begin
+				state <= WRITE;
+				j <= j + 1;
+			end else begin
+				state <= IDLE;
 			end
-			state <= IDLE;
+			offset <= j; //make sure offset is incremented on next clock edge to account for memory write delay
     end
 	 endcase
   end
