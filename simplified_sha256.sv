@@ -28,6 +28,13 @@ logic [15:0] cur_addr;
 logic [31:0] cur_write_data;
 logic [512:0] memory_block;
 logic [ 7:0] tstep;
+logic [31:0] s0, s1;
+
+function logic [31:0] wtnew;
+	s0 = rightrotate(w[i-15],7)^rightrotate(w[i-15],18)^(w[i-15]>>3);
+	s1 = rightrotate(w[i-2],17)^rightrotate(w[i-2],19)^(w[i-2]>>10);
+	wtnew = w[i-16] + s0 + w[i-7] + s1;
+endfunction
 
 // SHA256 K constants
 parameter int k[0:63] = '{
@@ -184,9 +191,23 @@ begin
     // move to WRITE stage
     COMPUTE: begin
 	// 64 processing rounds steps for 512-bit block 
+	
+	/*if (i < 64) begin
+			for (int n = 0; n < 15; n++) begin
+				w[n] <= w[n+1];
+				w[15] <= wtnew();
+			end*/
+			
+			
         if (i < 64) begin
-			if (i < 48) begin
+			/*if (i < 48) begin
 				w[i+16] <= w[i] + (rightrotate(w[i+1],7) ^ rightrotate(w[i+1],18) ^ (w[i+1] >> 3)) + w[i+9] + (rightrotate(w[i+14],17) ^ rightrotate(w[i+14],19) ^ (w[i+14] >> 10));
+			end*/
+			if (i >= 16) begin
+				for (int n = 0; n < 15; n++) begin
+					w[n] <= w[n+1];
+					w[15] <= wtnew();
+				end
 			end
 			{a,b,c,d,e,f,g,h} <= sha256_op(a,b,c,d,e,f,g,h,wt,i);
 			i <= i + 1;
