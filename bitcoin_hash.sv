@@ -32,6 +32,7 @@ logic [15:0] cur_addr;
 logic start_sha256_1, start_sha256_2, start_sha256_3;
 logic sha256_done_1, sha256_done_2, sha256_done_3;
 logic [31:0] starting_hash[8];
+logic [31:0] final_out[256];
 
 assign starting_hash[0] = 32'h6a09e667;
 assign starting_hash[1] = 32'hbb67ae85;
@@ -108,7 +109,7 @@ always_ff @(posedge clk, negedge reset_n) begin
 				state <= PHASE_TWO_CALCULATE;
 			end
 			else if (sha256_done_2 && count < 16) begin // repeat calculation 16 times
-				count <= count + 1;
+				
 				state <= PHASE_TWO_READ;
 			end
 			else if (sha256_done_2) begin
@@ -122,6 +123,9 @@ always_ff @(posedge clk, negedge reset_n) begin
 		
 		PHASE_THREE_READ : begin
 			//TODO
+			// reads 8 words outputted from phase 2, all other words are 0
+			// will increment count up to 16, repeating phase two and three for each nonce value
+			// At the end, write h0 from each iteration to memory
 		end
 		
 		PHASE_THREE_CALCULATE : begin
@@ -169,7 +173,7 @@ simplified_sha256_part2 sha_256_inst_phase2 (
 		.hash(sha256_hash) // uses hash from phase 1 output
 	);
 
-simplified_sha256_part2 #(.NUM_OF_WORDS(8)) sha_256_inst_phase3 (
+simplified_sha256_part2 sha_256_inst_phase3 (
 		.clk(clk),
 		.reset_n(reset_n),
 		.start(start_sha256_3),
