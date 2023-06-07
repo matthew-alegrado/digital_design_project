@@ -1,27 +1,20 @@
 module simplified_sha256_part2 #(
-	parameter integer NUM_OF_WORDS = 16,
-							H0_P = 32'h6a09e667, // h values for phase 1
-							H1_P = 32'hbb67ae85,
-							H2_P = 32'h3c6ef372,
-							H3_P = 32'ha54ff53a,
-							H4_P = 32'h510e527f,
-							H5_P = 32'h9b05688c,
-							H6_P = 32'h1f83d9ab,
-							H7_P = 32'h5be0cd19
-	)
+	parameter integer NUM_OF_WORDS = 16)
+	
 (input logic  clk, reset_n, start,
- //input logic  [15:0] message_addr, output_addr,
+ input logic  [15:0] message_addr, output_addr,
  output logic done, mem_clk, mem_we,
- //output logic [15:0] mem_addr,
- output logic [31:0] mem_write_data,
- input logic [31:0] mem_read_data[16]); // changed mem_read_data to a vector, meant to connect to sha256_in
+ output logic [15:0] mem_addr,
+ output logic [31:0] mem_write_data[8], // changed mem_write_data to a vector
+ input logic [31:0] mem_read_data[16], // changed mem_read_data to a vector, meant to connect to sha256_in
+ input logic [31:0] hash[8]); //h0 to h7 controlled by hash vector
 
 // FSM state variables 
 enum logic [2:0] {IDLE, READ, BLOCK, COMPUTE, WRITE} state;
 
 // Local variables
 logic [31:0] w[64];
-logic [31:0] message[16]; // changed from 20 to 16, should only be taking in 16 words at a time
+logic [31:0] message[16];
 logic [31:0] wt;
 logic [31:0] h0, h1, h2, h3, h4, h5, h6, h7;
 logic [31:0] a, b, c, d, e, f, g, h;
@@ -31,7 +24,7 @@ logic [ 7:0] num_blocks;
 logic [7:0]  curr_block;
 logic        cur_we;
 logic [15:0] cur_addr;
-logic [31:0] cur_write_data;
+logic [31:0] cur_write_data[8];
 logic [512:0] memory_block;
 logic [ 7:0] tstep;
 
@@ -51,8 +44,8 @@ parameter int k[0:63] = '{
 assign num_blocks = 1; // should only support one block
 assign tstep = (i - 1);
 assign wt = w[i];
+assign mem_write_data = cur_write_data;
 
-// Function to determine number of blocks in memory to fetch
 function logic [15:0] determine_num_blocks(input logic [31:0] size);
 
   determine_num_blocks = size / 512 + (size % 512 != 0);
@@ -66,8 +59,6 @@ function logic [255:0] sha256_op(input logic [31:0] a, b, c, d, e, f, g, h, w,
     logic [31:0] S1, S0, ch, maj, t1, t2; // internal signals
 begin
     S1 = rightrotate(e, 6) ^ rightrotate(e, 11) ^ rightrotate(e, 25);
-    // Student to add remaning code below
-    // Refer to SHA256 discussion slides to get logic for this function
     ch = (e & f) ^ (~e & g);
     t1 = h + S1 + ch + k[t] + w;
     S0 = rightrotate(a,2) ^ rightrotate(a,13) ^ rightrotate(a,22);
@@ -77,26 +68,11 @@ begin
 end
 endfunction
 
-
-// Generate request to memory
-// for reading from memory to get original message
-// for writing final computed has value
-assign mem_clk = clk;
-//assign mem_addr = cur_addr + offset;
-assign mem_we = cur_we;
-assign mem_write_data = cur_write_data;
-
-
-// Right rotation function
 function logic [31:0] rightrotate(input logic [31:0] x,
                                   input logic [ 7:0] r);
    rightrotate = (x >> r) | (x << (32 - r));
 endfunction
 
-
-// SHA-256 FSM 
-// Get a BLOCK from the memory, COMPUTE Hash output using SHA256 function
-// and write back hash value back to memory
 always_ff @(posedge clk, negedge reset_n)
 begin
   if (!reset_n) begin
@@ -107,14 +83,14 @@ begin
     // Initialize hash values h0 to h7 and a to h, other variables and memory we, address offset, etc
     IDLE: begin 
        if(start) begin
-			h0 <= H0_P; // starting h seed has been parametrized, so we can modify it from outside
-			h1 <= H1_P;
-			h2 <= H2_P;
-			h3 <= H3_P;
-			h4 <= H4_P;
-			h5 <= H5_P;
-			h6 <= H6_P;
-			h7 <= H7_P;
+			h0 <= hash[0]; // starting h seed based on hash vector, so we can modify it from outside
+			h1 <= hash[1];
+			h2 <= hash[2];
+			h3 <= hash[3];
+			h4 <= hash[4];
+			h5 <= hash[5];
+			h6 <= hash[6];
+			h7 <= hash[7];
 			//cur_addr <= message_addr;
 			offset <= 0;
 			cur_we <= 0;
@@ -126,22 +102,10 @@ begin
     end
 	 
 	 READ: begin
-        /*if (offset == 0) begin
-            cur_addr <= message_addr;
-        end
-        message[offset] <= mem_read_data;
-        offset <= offset + 1;
-        if (offset == NUM_OF_WORDS) state <= BLOCK;
-        else state <= READ;*/
 		  message <= mem_read_data;
      end
 
-    // SHA-256 FSM 
-    // Get a BLOCK from the memory, COMPUTE Hash output using SHA256 function    
-    // and write back hash value back to memory
     BLOCK: begin
-	// Fetch message in 512-bit block size
-	// For each of 512-bit block initiate hash value computation
 			if (curr_block == num_blocks) begin
 				offset <= 0;
 				state <= WRITE;
@@ -173,12 +137,7 @@ begin
 			end
     end
 
-    // For each block compute hash function
-    // Go back to BLOCK stage after each block hash computation is completed and if
-    // there are still number of message blocks available in memory otherwise
-    // move to WRITE stage
     COMPUTE: begin
-	// 64 processing rounds steps for 512-bit block 
         if (i <= 64) begin
 			if (i < 48) begin
 				w[i+16] <= w[i] + (rightrotate(w[i+1],7) ^ rightrotate(w[i+1],18) ^ (w[i+1] >> 3)) + w[i+9] + (rightrotate(w[i+14],17) ^ rightrotate(w[i+14],19) ^ (w[i+14] >> 10));
@@ -191,14 +150,6 @@ begin
 			f <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 160;
 			g <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 192;
 			h <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 224;
-
-
-
-
-
-
-
-
 			i <= i + 1;
 			state <= COMPUTE;
         end else begin
@@ -207,50 +158,21 @@ begin
 		  end
     end
 
-    // h0 to h7 each are 32 bit hashes, which makes up total 256 bit value
-    // h0 to h7 after compute stage has final computed hash value
-    // write back these h0 to h7 to memory starting from output_addr
     WRITE: begin
-			//cur_addr <= output_addr;
-			cur_we <= 1;
-         case(offset)
-             0: begin
-                 cur_write_data <= h0;
-             end
-             1: begin
-                 cur_write_data <= h1;
-             end
-             2: begin
-                 cur_write_data <= h2;
-             end
-             3: begin
-                 cur_write_data <= h3;
-             end
-             4: begin
-                 cur_write_data <= h4;
-             end
-             5: begin
-                 cur_write_data <= h5;
-             end
-             6: begin
-                 cur_write_data <= h6;
-             end
-             default: begin
-                 cur_write_data <= h7;
-             end
-         endcase
-			if (offset < 7) begin
-				state <= WRITE;
-				offset <= offset + 1;
-			end
-			else begin
-				state <= IDLE;
-			end
+			cur_write_data[0] <= h0;
+			cur_write_data[1] <= h1;
+			cur_write_data[2] <= h2;            
+			cur_write_data[3] <= h3;             
+			cur_write_data[4] <= h4;             
+			cur_write_data[5] <= h5;             
+			cur_write_data[6] <= h6;          
+			cur_write_data[7] <= h7;
+			state <= IDLE;
     end
+	 
 	 endcase
   end
-
-// Generate done when SHA256 hash computation has finished and moved to IDLE state
+  
 assign done = (state == IDLE);
 
 endmodule
