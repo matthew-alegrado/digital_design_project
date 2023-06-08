@@ -43,7 +43,7 @@ parameter int k[0:63] = '{
 
 assign num_blocks = 1; // should only support one block
 assign tstep = (i - 1);
-assign wt = w[i];
+assign wt = w[0];
 assign mem_write_data = cur_write_data;
 
 function logic [15:0] determine_num_blocks(input logic [31:0] size);
@@ -71,6 +71,15 @@ endfunction
 function logic [31:0] rightrotate(input logic [31:0] x,
                                   input logic [ 7:0] r);
    rightrotate = (x >> r) | (x << (32 - r));
+endfunction
+
+function logic [31:0] wtnew;
+	logic[31:0] s0,s1;
+	begin
+		s0 = rightrotate(w[1],7)^rightrotate(w[1],18)^(w[1]>>3);
+		s1 = rightrotate(w[14],17)^rightrotate(w[14],19)^(w[14]>>10);
+		wtnew = w[0] + s0 + w[9] + s1;
+	end
 endfunction
 
 always_ff @(posedge clk, negedge reset_n)
@@ -102,7 +111,9 @@ begin
     end
 	 
 	 READ: begin
-		  message <= mem_read_data;
+		for (int n = 0; n < 16; n++)
+		  message[n] <= mem_read_data[n];
+		state <= BLOCK;
      end
 
     BLOCK: begin
@@ -112,17 +123,7 @@ begin
 				cur_we <= 1;
 			end else begin
 				for (int l = 0; l < 16; l++) begin
-					if ((curr_block << 4) + l >= NUM_OF_WORDS) begin
-						if (l == 15)
-							w[l] <= (NUM_OF_WORDS << 5);
-						else if (l == 14)
-							w[l] <= (NUM_OF_WORDS >> 27);
-						else if ((curr_block << 4) + l == NUM_OF_WORDS)
-							w[l] <= {1'b1,31'b0};
-						else
-							w[l] <= 32'b0;
-					end else
-						w[l] <= message[(curr_block << 4) + l];
+					w[l] <= message[l];
 				end
 				a = h0;
 				b = h1;
@@ -138,21 +139,23 @@ begin
     end
 
     COMPUTE: begin
-        if (i <= 64) begin
-			if (i < 48) begin
-				w[i+16] <= w[i] + (rightrotate(w[i+1],7) ^ rightrotate(w[i+1],18) ^ (w[i+1] >> 3)) + w[i+9] + (rightrotate(w[i+14],17) ^ rightrotate(w[i+14],19) ^ (w[i+14] >> 10));
+        if (i < 64) begin
+			for (int m = 0; m < 15; m++) begin
+				w[m] <= w[m+1];
 			end
-			a <= sha256_op(a,b,c,d,e,f,g,h,wt,i);
-			b <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 32;
-			c <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 64;
-			d <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 96;
-			e <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 128;
-			f <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 160;
-			g <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 192;
-			h <= sha256_op(a,b,c,d,e,f,g,h,wt,i) >> 224;
+			w[15] <= wtnew;
+			{a,b,c,d,e,f,g,h} <= sha256_op(a,b,c,d,e,f,g,h,wt,i);
 			i <= i + 1;
 			state <= COMPUTE;
         end else begin
+			h0 <= h0 + a;
+			h1 <= h1 + b;
+			h2 <= h2 + c;
+			h3 <= h3 + d;
+			h4 <= h4 + e;
+			h5 <= h5 + f;
+			h6 <= h6 + g;
+			h7 <= h7 + h;
 			curr_block <= curr_block + 1;
          state <= BLOCK;
 		  end
