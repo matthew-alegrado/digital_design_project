@@ -28,11 +28,13 @@ logic [31:0] sha256_hash[8];
 logic [31:0] sha256_out_1[8], sha256_out_2[8], sha256_out_3[8];
 logic [31:0] cur_write_data;
 logic [7:0] count;
+logic delay_tmp;
 logic [15:0] cur_addr;
 logic start_sha256_1, start_sha256_2, start_sha256_3;
 logic sha256_done_1, sha256_done_2, sha256_done_3;
 logic [31:0] starting_hash[8];
 logic [31:0] final_out_h0[16];
+logic cur_we;
 
 assign starting_hash[0] = 32'h6a09e667;
 assign starting_hash[1] = 32'hbb67ae85;
@@ -45,24 +47,34 @@ assign starting_hash[7] = 32'h5be0cd19;
 
 assign mem_write_data = cur_write_data;
 assign mem_addr = cur_addr;
-
+assign mem_clk = clk;
+assign mem_we = cur_we;
 
 always_ff @(posedge clk, negedge reset_n) begin
 	if (reset_n == 0) begin
-		count <= 0;
-		start_sha256_1 <= 0;
-		start_sha256_2 <= 0;
-		start_sha256_3 <= 0;
-		state <= PHASE_ONE_READ;
-		for (int i = 0; i < 16; i++) begin
-			sha256_in[i] <= 0;
-		end
-		for (int i = 0; i < 8; i++) begin
-			sha256_hash[i] <= 0;
-		end
-		
+		state <= IDLE;
 	end
 	else case(state)
+		IDLE : begin
+			if (start) begin
+				delay_tmp <= 0;
+				count <= 0;
+				start_sha256_1 <= 0;
+				start_sha256_2 <= 0;
+				start_sha256_3 <= 0;
+				cur_we <= 0;
+				for (int i = 0; i < 16; i++) begin
+					sha256_in[i] <= 0;
+				end
+				for (int i = 0; i < 8; i++) begin
+					sha256_hash[i] <= 0;
+				end
+				state <= PHASE_ONE_READ;
+			end else begin
+				state <= IDLE;
+			end
+		end
+	
 		PHASE_ONE_READ : begin // This reads w[0] to w[15] into sha256_in vector, which is loaded into sha256 inst
 			if (count == 0) begin
 				cur_addr <= message_addr;
@@ -80,14 +92,23 @@ always_ff @(posedge clk, negedge reset_n) begin
 		end
 		
 		PHASE_ONE_CALCULATE : begin
-			if (!start_sha256_1) begin
+			if (!delay_tmp && !start_sha256_1) begin
 				start_sha256_1 <= 1;
+				state <= PHASE_ONE_CALCULATE;
+			end
+			else if (!delay_tmp) begin
+				delay_tmp <= 1;
+				state <= PHASE_ONE_CALCULATE;
+			end
+			else if (start_sha256_1) begin
+				start_sha256_1 <= 0;
 				state <= PHASE_ONE_CALCULATE;
 			end
 			else if (!sha256_done_1) state <= PHASE_ONE_CALCULATE;
 			else begin
 				sha256_hash <= sha256_out_1; // writes phase 1 out to hash of phase 2
 				state <= PHASE_TWO_READ;
+				delay_tmp <= 0;
 			end
 		end
 			
@@ -139,10 +160,17 @@ always_ff @(posedge clk, negedge reset_n) begin
 			end
 		end
 		
-		FINAL_PHASE : begin			
-			cur_write_data <= final_out_h0[count];
-			cur_addr <= output_addr + count;
-			count <= count + 1;
+		FINAL_PHASE : begin	
+			if (count < 16) begin
+				cur_write_data <= final_out_h0[count];
+				cur_addr <= output_addr + count;
+				count <= count + 1;
+				cur_we <= 0;
+			end else if (count == 16) count <= count+1;
+			else begin
+				state <= IDLE;
+				cur_we <= 0;
+			end
 		end
 		
 		default : begin
@@ -151,6 +179,8 @@ always_ff @(posedge clk, negedge reset_n) begin
 		
 		endcase
 	end
+	
+assign done = (state == IDLE);
 
 simplified_sha256_part2 sha_256_inst_phase1 ( // changed the sha256 file name to include _part2 for clarity
 		.clk(clk),
