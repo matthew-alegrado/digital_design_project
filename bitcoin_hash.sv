@@ -7,7 +7,7 @@ module bitcoin_hash (input logic        clk, reset_n, start,
 
 parameter num_nonces = 16;
 
-enum logic [4:0] {IDLE, PHASE_ONE_READ, PHASE_ONE_CALCULATE, PHASE_TWO_READ, PHASE_TWO_CALCULATE, PHASE_THREE_READ, PHASE_THREE_CALCULATE} state;
+enum logic [4:0] {IDLE, PHASE_ONE_READ, PHASE_ONE_CALCULATE, PHASE_TWO_READ, PHASE_TWO_CALCULATE, PHASE_THREE, FINAL_PHASE} state;
 logic [31:0] hout[num_nonces];
 
 parameter int k[64] = '{
@@ -26,13 +26,13 @@ parameter int k[64] = '{
 logic [31:0] sha256_in[16]; 
 logic [31:0] sha256_hash[8]; 
 logic [31:0] sha256_out_1[8], sha256_out_2[8], sha256_out_3[8];
-//logic [31:0] sha256_out_temp;
+logic [31:0] cur_write_data;
 logic [7:0] count;
 logic [15:0] cur_addr;
 logic start_sha256_1, start_sha256_2, start_sha256_3;
 logic sha256_done_1, sha256_done_2, sha256_done_3;
 logic [31:0] starting_hash[8];
-logic [31:0] final_out[256];
+logic [31:0] final_out_h0[16];
 
 assign starting_hash[0] = 32'h6a09e667;
 assign starting_hash[1] = 32'hbb67ae85;
@@ -42,6 +42,9 @@ assign starting_hash[4] = 32'h510e527f;
 assign starting_hash[5] = 32'h9b05688c;
 assign starting_hash[6] = 32'h1f83d9ab;
 assign starting_hash[7] = 32'h5be0cd19;
+
+assign mem_write_data = cur_write_data;
+assign mem_addr = cur_addr;
 
 
 always_ff @(posedge clk, negedge reset_n) begin
@@ -66,7 +69,7 @@ always_ff @(posedge clk, negedge reset_n) begin
 			end
 			if (count < 16) begin
 				sha256_in[count] <= mem_read_data;
-				mem_addr <= cur_addr + 1;
+				cur_addr <= cur_addr + 1;
 				count <= count + 1;
 				state <= PHASE_ONE_READ;
 			end
@@ -91,7 +94,7 @@ always_ff @(posedge clk, negedge reset_n) begin
 		PHASE_TWO_READ : begin // handles inputs to phase 2 sha256
 			if (count == 0) begin
 				for (int i = 0; i < 3; i++) begin // write message[16 to 18] into sha256_in[0 to 2]
-					mem_addr <= message_addr + i + 16; 
+					cur_addr <= message_addr + i + 16; 
 					sha256_in[i] <= mem_read_data;
 				end
 				for (int i = 4; i < 14; i++) begin // padding
@@ -108,28 +111,38 @@ always_ff @(posedge clk, negedge reset_n) begin
 				start_sha256_2 <= 1;
 				state <= PHASE_TWO_CALCULATE;
 			end
-			else if (sha256_done_2 && count < 16) begin // repeat calculation 16 times
-				
-				state <= PHASE_TWO_READ;
-			end
 			else if (sha256_done_2) begin
 				for (int i = 0; i < 8; i++) begin // write phase 2 out into input of phase 3 [0 to 7]
 					sha256_in[i] <= sha256_out_2[i];
 				end
-				state <= PHASE_THREE_READ;
+				for (int i = 8; i < 16; i++) begin // phase 3 in [8 to 15] are 0s
+					sha256_in[i] <= 0;
+				end
+				state <= PHASE_THREE;
 			end
 			else state <= PHASE_TWO_CALCULATE;		
 		end
 		
-		PHASE_THREE_READ : begin
+		PHASE_THREE : begin
 			//TODO
 			// reads 8 words outputted from phase 2, all other words are 0
 			// will increment count up to 16, repeating phase two and three for each nonce value
 			// At the end, write h0 from each iteration to memory
+			if (!start_sha256_3) begin
+				start_sha256_3 <= 1;
+				state <= PHASE_THREE;
+			end
+			else if (sha256_done_3) begin
+				final_out_h0[count] <= sha256_out_3[0];
+				count <= 0;
+				state <= FINAL_PHASE;
+			end
 		end
 		
-		PHASE_THREE_CALCULATE : begin
-			//TODO
+		FINAL_PHASE : begin			
+			cur_write_data <= final_out_h0[count];
+			cur_addr <= output_addr + count;
+			count <= count + 1;
 		end
 		
 		default : begin

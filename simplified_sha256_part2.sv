@@ -13,7 +13,7 @@ module simplified_sha256_part2 #(
 enum logic [2:0] {IDLE, READ, BLOCK, COMPUTE, WRITE} state;
 
 // Local variables
-logic [31:0] w[64];
+logic [31:0] w[16];
 logic [31:0] message[16];
 logic [31:0] wt;
 logic [31:0] h0, h1, h2, h3, h4, h5, h6, h7;
