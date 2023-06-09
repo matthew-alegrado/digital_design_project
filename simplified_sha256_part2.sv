@@ -2,9 +2,7 @@ module simplified_sha256_part2 #(
 	parameter integer NUM_OF_WORDS = 16)
 	
 (input logic  clk, reset_n, start,
- input logic  [15:0] message_addr, output_addr,
- output logic done, mem_clk, mem_we,
- output logic [15:0] mem_addr,
+ output logic done,
  output logic [31:0] mem_write_data[8], // changed mem_write_data to a vector
  input logic [31:0] mem_read_data[16], // changed mem_read_data to a vector, meant to connect to sha256_in
  input logic [31:0] hash[8]); //h0 to h7 controlled by hash vector
@@ -19,14 +17,11 @@ logic [31:0] wt;
 logic [31:0] h0, h1, h2, h3, h4, h5, h6, h7;
 logic [31:0] a, b, c, d, e, f, g, h;
 logic [ 7:0] i, j;
-logic [15:0] offset; // in word address
 logic [ 7:0] num_blocks;
 logic [7:0]  curr_block;
-logic        cur_we;
 logic [15:0] cur_addr;
 logic [31:0] cur_write_data[8];
 logic [512:0] memory_block;
-logic [ 7:0] tstep;
 
 // SHA256 K constants
 parameter int k[0:63] = '{
@@ -42,7 +37,6 @@ parameter int k[0:63] = '{
 
 
 assign num_blocks = 1; // should only support one block
-assign tstep = (i - 1);
 assign wt = w[0];
 assign mem_write_data = cur_write_data;
 
@@ -85,7 +79,6 @@ endfunction
 always_ff @(posedge clk, negedge reset_n)
 begin
   if (!reset_n) begin
-    cur_we <= 1'b0;
     state <= IDLE;
   end 
   else case (state)
@@ -100,9 +93,6 @@ begin
 			h5 <= hash[5];
 			h6 <= hash[6];
 			h7 <= hash[7];
-			//cur_addr <= message_addr;
-			offset <= 0;
-			cur_we <= 0;
 			curr_block <= 0;
 			state <= READ;
        end else begin
@@ -118,9 +108,7 @@ begin
 
     BLOCK: begin
 			if (curr_block == num_blocks) begin
-				offset <= 0;
 				state <= WRITE;
-				cur_we <= 1;
 			end else begin
 				for (int l = 0; l < 16; l++) begin
 					w[l] <= message[l];
