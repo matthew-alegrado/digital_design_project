@@ -154,13 +154,13 @@ always_ff @(posedge clk, negedge reset_n) begin
 			for (int i = 0; i < 3; i++) begin
 				sha256_in[i] <= message[i + 16];
 			end
-			for (int i = 4; i < 15; i++) begin // padding
+			for (int i = 5; i < 15; i++) begin // padding
 				sha256_in[i] <= 0;
 			end
+			sha256_in[3] <= phase_iter; // nonce increments by 1 each cycle	
+			sha256_in[4] <= 32'h80000000;
 			sha256_in[15] <= 32'd640; // message length
-			state <= PHASE_TWO_CALCULATE;
-
-		sha256_in[3] <= phase_iter; // nonce increments by 1 each cycle			
+			state <= PHASE_TWO_CALCULATE;		
 		end
 		
 		PHASE_TWO_CALCULATE : begin
@@ -170,15 +170,22 @@ always_ff @(posedge clk, negedge reset_n) begin
 			end
 			else if (!delay_tmp) begin
 				delay_tmp <= 1;
+				state <= PHASE_TWO_CALCULATE;
+			end
+			else if (start_sha256_2) begin
 				start_sha256_2 <= 0;
+				state <= PHASE_TWO_CALCULATE;
 			end
 			else if (sha256_done_2) begin
 				for (int i = 0; i < 8; i++) begin // write phase 2 out into input of phase 3 [0 to 7]
 					sha256_in[i] <= sha256_out_2[i];
 				end
-				for (int i = 8; i < 16; i++) begin // phase 3 in [8 to 15] are 0s
+				for (int i = 9; i < 15; i++) begin // phase 3 in [8 to 15] are 0s
 					sha256_in[i] <= 0;
 				end
+				sha256_in[8] <= 32'h80000000;
+				sha256_in[15] <= 32'd256;
+				delay_tmp <= 0;
 				state <= PHASE_THREE;
 			end
 			else state <= PHASE_TWO_CALCULATE;		
@@ -189,11 +196,18 @@ always_ff @(posedge clk, negedge reset_n) begin
 			// reads 8 words outputted from phase 2, all other words are 0
 			// will increment count up to 16, repeating phase two and three for each nonce value
 			// At the end, write h0 from each iteration to memory
-			if (!start_sha256_3) begin
+			if (!start_sha256_3 && !delay_tmp) begin
 				start_sha256_3 <= 1;
-				delay_tmp <= 0;
 				state <= PHASE_THREE;
 			end
+			else if (!delay_tmp) begin
+				delay_tmp <= 1;
+				state <= PHASE_THREE;
+			end
+			else if (start_sha256_3) begin
+				start_sha256_3 <= 0;
+				state <= PHASE_THREE;
+			end 
 			else if (sha256_done_3 && delay_tmp) begin
 				final_out_h0[phase_iter] <= sha256_out_3[0];
 				//count <= 0;
