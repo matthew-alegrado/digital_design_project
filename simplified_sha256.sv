@@ -15,6 +15,7 @@ enum logic [2:0] {IDLE, READ, BLOCK, COMPUTE, WRITE} state;
 
 // Local variables
 logic [31:0] w[15:0];
+logic [31:0] pipeVal, pipeReg;
 logic [31:0] message[19:0];
 logic [31:0] wt;
 logic [31:0] h0, h1, h2, h3, h4, h5, h6, h7;
@@ -45,6 +46,7 @@ parameter int k[0:63] = '{
 assign num_blocks = determine_num_blocks(NUM_OF_WORDS); 
 assign tstep = (i - 1);
 assign wt = w[0];
+assign pipeVal = g + k[i+1] + w[1];
 
 // Note : Function defined are for reference purpose. Feel free to add more functions or modify below.
 // Function to determine number of blocks in memory to fetch
@@ -67,7 +69,7 @@ begin
     // Student to add remaning code below
     // Refer to SHA256 discussion slides to get logic for this function
     ch = (e & f) ^ (~e & g);
-    t1 = h + S1 + ch + k[t] + w;
+    t1 = S1 + ch + pipeReg;
     S0 = rightrotate(a,2) ^ rightrotate(a,13) ^ rightrotate(a,22);
     maj = (a & b) ^ (a & c) ^ (b & c);
     t2 = S0 + maj;
@@ -181,6 +183,7 @@ begin
 				f <= h5;
 				g <= h6;
 				h <= h7;
+				pipeReg <= k[0] + h7 + ((curr_block << 4) >= NUM_OF_WORDS? ((curr_block << 4) == NUM_OF_WORDS? {1'b1,31'b0} : 32'b0) : message[(curr_block << 4)]);
 				i <= 0;
 				state <= COMPUTE;
 			end
@@ -198,6 +201,7 @@ begin
 			end
 			w[15] <= wtnew;
 			{a,b,c,d,e,f,g,h} <= sha256_op(a,b,c,d,e,f,g,h,wt,i);
+			pipeReg <= pipeVal;
 			i <= i + 1;
 			state <= COMPUTE;
         end else begin
