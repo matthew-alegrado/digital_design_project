@@ -17,18 +17,15 @@ enum logic [2:0] {IDLE, READ, BLOCK, COMPUTE, WRITE} state;
 logic [31:0] w[15:0];
 logic [31:0] pipeVal, pipeReg;
 logic [31:0] message[19:0];
-logic [31:0] wt;
 logic [31:0] h0, h1, h2, h3, h4, h5, h6, h7;
 logic [31:0] a, b, c, d, e, f, g, h;
-logic [ 7:0] i, j;
+logic [ 7:0] i;
 logic [15:0] offset; // in word address
 logic [ 7:0] num_blocks;
 logic [7:0]  curr_block;
 logic        cur_we;
 logic [15:0] cur_addr;
 logic [31:0] cur_write_data;
-logic [512:0] memory_block;
-logic [ 7:0] tstep;
 
 // SHA256 K constants
 parameter int k[0:63] = '{
@@ -43,9 +40,7 @@ parameter int k[0:63] = '{
 };
 
 
-assign num_blocks = determine_num_blocks(NUM_OF_WORDS); 
-assign tstep = (i - 1);
-assign wt = w[0];
+assign num_blocks = determine_num_blocks(NUM_OF_WORDS);
 assign pipeVal = g + k[i+1] + w[1];
 
 // Note : Function defined are for reference purpose. Feel free to add more functions or modify below.
@@ -61,8 +56,7 @@ endfunction
 
 
 // SHA256 hash round
-function logic [255:0] sha256_op(input logic [31:0] a, b, c, d, e, f, g, h, w,
-                                 input logic [7:0] t);
+function logic [255:0] sha256_op(input logic [31:0] a, b, c, d, e, f, g, h);
     logic [31:0] S1, S0, ch, maj, t1, t2; // internal signals
 begin
     S1 = rightrotate(e, 6) ^ rightrotate(e, 11) ^ rightrotate(e, 25);
@@ -82,8 +76,6 @@ endfunction
 // for reading from memory to get original message
 // for writing final computed has value
 assign mem_clk = clk;
-logic[31:0] test;
-assign test = message[0];
 assign mem_addr = cur_addr + offset;
 assign mem_we = cur_we;
 assign mem_write_data = cur_write_data;
@@ -159,7 +151,7 @@ begin
 	// Fetch message in 512-bit block size
 	// For each of 512-bit block initiate hash value computation
 			if (curr_block == num_blocks) begin
-				j <= 0;
+				i <= 0;
 				state <= WRITE;
 			end else begin
 				for (int l = 0; l < 16; l++) begin
@@ -200,7 +192,7 @@ begin
 				w[m] <= w[m+1];
 			end
 			w[15] <= wtnew;
-			{a,b,c,d,e,f,g,h} <= sha256_op(a,b,c,d,e,f,g,h,wt,i);
+			{a,b,c,d,e,f,g,h} <= sha256_op(a,b,c,d,e,f,g,h);
 			pipeReg <= pipeVal;
 			i <= i + 1;
 			state <= COMPUTE;
@@ -223,8 +215,8 @@ begin
     // write back these h0 to h7 to memory starting from output_addr
     WRITE: begin
 			cur_addr <= output_addr;
-			cur_we <= (j < 8);
-         case(j)
+			cur_we <= (i < 8);
+         case(i)
              0: begin
                  cur_write_data <= h0;
              end
@@ -250,13 +242,13 @@ begin
                  cur_write_data <= h7;
              end
          endcase
-			if (j < 8) begin
+			if (i < 8) begin
 				state <= WRITE;
-				j <= j + 1;
+				i <= i + 1;
 			end else begin
 				state <= IDLE;
 			end
-			offset <= j; //make sure offset is incremented on next clock edge to account for memory write delay
+			offset <= i; //make sure offset is incremented on next clock edge to account for memory write delay
     end
 	 endcase
   end
