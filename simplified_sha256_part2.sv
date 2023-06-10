@@ -8,20 +8,15 @@ module simplified_sha256_part2 #(
  input logic [31:0] hash[8]); //h0 to h7 controlled by hash vector
 
 // FSM state variables 
-enum logic [2:0] {IDLE, READ, BLOCK, COMPUTE, WRITE} state;
+enum logic [1:0] {IDLE, READ, COMPUTE} state;
 
 // Local variables
 logic [31:0] w[16];
-logic [31:0] message[16];
 logic [31:0] wt;
 logic [31:0] h0, h1, h2, h3, h4, h5, h6, h7;
 logic [31:0] a, b, c, d, e, f, g, h;
 logic [ 7:0] i, j;
-logic [ 7:0] num_blocks;
-logic [7:0]  curr_block;
-logic [15:0] cur_addr;
 logic [31:0] cur_write_data[8];
-logic [512:0] memory_block;
 
 // SHA256 K constants
 parameter int k[0:63] = '{
@@ -36,15 +31,8 @@ parameter int k[0:63] = '{
 };
 
 
-assign num_blocks = 1; // should only support one block
 assign wt = w[0];
 assign mem_write_data = cur_write_data;
-
-function logic [15:0] determine_num_blocks(input logic [31:0] size);
-
-  determine_num_blocks = size / 512 + (size % 512 != 0);
-
-endfunction
 
 
 // SHA256 hash round
@@ -93,7 +81,6 @@ begin
 			h5 <= hash[5];
 			h6 <= hash[6];
 			h7 <= hash[7];
-			curr_block <= 0;
 			state <= READ;
        end else begin
 			state <= IDLE;
@@ -101,30 +88,20 @@ begin
     end
 	 
 	 READ: begin
-		for (int n = 0; n < 16; n++)
-		  message[n] <= mem_read_data[n];
-		state <= BLOCK;
-     end
-
-    BLOCK: begin
-			if (curr_block == num_blocks) begin
-				state <= WRITE;
-			end else begin
-				for (int l = 0; l < 16; l++) begin
-					w[l] <= message[l];
-				end
-				a = h0;
-				b = h1;
-				c = h2;
-				d = h3;
-				e = h4;
-				f = h5;
-				g = h6;
-				h = h7;
-				i <= 0;
-				state <= COMPUTE;
+			for (int l = 0; l < 16; l++) begin
+				w[l] <= mem_read_data[l];
 			end
-    end
+			a <= h0;
+			b <= h1;
+			c <= h2;
+			d <= h3;
+			e <= h4;
+			f <= h5;
+			g <= h6;
+			h <= h7;
+			i <= 0;
+			state <= COMPUTE;
+     end
 
     COMPUTE: begin
         if (i < 64) begin
@@ -136,29 +113,16 @@ begin
 			i <= i + 1;
 			state <= COMPUTE;
         end else begin
-			h0 <= h0 + a;
-			h1 <= h1 + b;
-			h2 <= h2 + c;
-			h3 <= h3 + d;
-			h4 <= h4 + e;
-			h5 <= h5 + f;
-			h6 <= h6 + g;
-			h7 <= h7 + h;
-			curr_block <= curr_block + 1;
-         state <= BLOCK;
-		  end
-    end
-
-    WRITE: begin
-			cur_write_data[0] <= h0;
-			cur_write_data[1] <= h1;
-			cur_write_data[2] <= h2;            
-			cur_write_data[3] <= h3;             
-			cur_write_data[4] <= h4;             
-			cur_write_data[5] <= h5;             
-			cur_write_data[6] <= h6;          
-			cur_write_data[7] <= h7;
+			cur_write_data[0] <= h0 + a;
+			cur_write_data[1] <= h1 + b;
+			cur_write_data[2] <= h2 + c;
+			cur_write_data[3] <= h3 + d;
+			cur_write_data[4] <= h4 + e;
+			cur_write_data[5] <= h5 + f;
+			cur_write_data[6] <= h6 + g;
+			cur_write_data[7] <= h7 + h;
 			state <= IDLE;
+		  end
     end
 	 
 	 endcase
