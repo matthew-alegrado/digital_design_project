@@ -12,11 +12,10 @@ enum logic [1:0] {IDLE, READ, COMPUTE} state;
 
 // Local variables
 logic [31:0] w[16];
-logic [31:0] wt;
+logic [31:0] pipeVal, pipeReg;
 logic [31:0] h0, h1, h2, h3, h4, h5, h6, h7;
 logic [31:0] a, b, c, d, e, f, g, h;
-logic [ 7:0] i, j;
-logic [31:0] cur_write_data[8];
+logic [ 7:0] i;
 
 // SHA256 K constants
 parameter int k[0:63] = '{
@@ -30,19 +29,24 @@ parameter int k[0:63] = '{
    32'h748f82ee,32'h78a5636f,32'h84c87814,32'h8cc70208,32'h90befffa,32'ha4506ceb,32'hbef9a3f7,32'hc67178f2
 };
 
+assign pipeVal = g + k[i+1] + w[1];
 
-assign wt = w[0];
-assign mem_write_data = cur_write_data;
-
+assign mem_write_data[0] = h0 + a;
+assign mem_write_data[1] = h1 + b;
+assign mem_write_data[2] = h2 + c;
+assign mem_write_data[3] = h3 + d;
+assign mem_write_data[4] = h4 + e;
+assign mem_write_data[5] = h5 + f;
+assign mem_write_data[6] = h6 + g;
+assign mem_write_data[7] = h7 + h;
 
 // SHA256 hash round
-function logic [255:0] sha256_op(input logic [31:0] a, b, c, d, e, f, g, h, w,
-                                 input logic [7:0] t);
+function logic [255:0] sha256_op(input logic [31:0] a, b, c, d, e, f, g, h);
     logic [31:0] S1, S0, ch, maj, t1, t2; // internal signals
 begin
     S1 = rightrotate(e, 6) ^ rightrotate(e, 11) ^ rightrotate(e, 25);
     ch = (e & f) ^ (~e & g);
-    t1 = h + S1 + ch + k[t] + w;
+    t1 = S1 + ch + pipeReg;
     S0 = rightrotate(a,2) ^ rightrotate(a,13) ^ rightrotate(a,22);
     maj = (a & b) ^ (a & c) ^ (b & c);
     t2 = S0 + maj;
@@ -100,6 +104,7 @@ begin
 			g <= h6;
 			h <= h7;
 			i <= 0;
+			pipeReg <= k[0] + h7 + mem_read_data[0];
 			state <= COMPUTE;
      end
 
@@ -109,18 +114,11 @@ begin
 				w[m] <= w[m+1];
 			end
 			w[15] <= wtnew;
-			{a,b,c,d,e,f,g,h} <= sha256_op(a,b,c,d,e,f,g,h,wt,i);
+			{a,b,c,d,e,f,g,h} <= sha256_op(a,b,c,d,e,f,g,h);
 			i <= i + 1;
+			pipeReg <= pipeVal;
 			state <= COMPUTE;
         end else begin
-			cur_write_data[0] <= h0 + a;
-			cur_write_data[1] <= h1 + b;
-			cur_write_data[2] <= h2 + c;
-			cur_write_data[3] <= h3 + d;
-			cur_write_data[4] <= h4 + e;
-			cur_write_data[5] <= h5 + f;
-			cur_write_data[6] <= h6 + g;
-			cur_write_data[7] <= h7 + h;
 			state <= IDLE;
 		  end
     end
