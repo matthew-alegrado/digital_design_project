@@ -6,7 +6,7 @@ module bitcoin_hash (input logic        clk, reset_n, start,
                      input logic [31:0] mem_read_data);
 
 parameter num_nonces = 16;
-parameter NUM_SHA256 = 8;
+parameter NUM_SHA256 = 16;
 
 enum logic [2:0] {IDLE, INIT_READ, PHASE_ONE_READ, PHASE_ONE_CALCULATE, PHASE_TWO_READ, PHASE_TWO_CALCULATE, PHASE_THREE, FINAL_PHASE} state;
 
@@ -35,7 +35,7 @@ parameter int starting_hash[8] = '{
 
 // Student to add rest of the code here
 
-logic [31:0] message[20];
+logic [31:0] message[19];
 logic [31:0] sha256_in[NUM_SHA256][16]; 
 logic [31:0] sha256_hash[8]; 
 logic [31:0] sha256_out[NUM_SHA256][8];
@@ -92,7 +92,7 @@ always_ff @(posedge clk, negedge reset_n) begin
 					message[count] <= mem_read_data;
 					count <= count + 1;
 					cur_addr <= cur_addr + 1;
-					if (count < 20) state <= INIT_READ;
+					if (count < 18) state <= INIT_READ;
 					else begin
 						state <= PHASE_ONE_READ;
 						delay_tmp <= 0;
@@ -217,29 +217,23 @@ always_ff @(posedge clk, negedge reset_n) begin
 				end
 			end
 			
-			FINAL_PHASE : begin	
-				if (phase_iter*NUM_SHA256 < num_nonces) begin
-					if (!delay_tmp) begin
-						state <= FINAL_PHASE;
-						cur_we <= 1;
-						delay_tmp <= 1;
-					end
-					else if (count < NUM_SHA256) begin
-						cur_write_data <= final_out_h0[phase_iter*NUM_SHA256 + count];
-						cur_addr <= output_addr + phase_iter*NUM_SHA256 + count;
-						state <= FINAL_PHASE;
-						count <= count + 1;
-					end
-					else begin
-						phase_iter <= phase_iter + 1;
-						cur_we <= 1;
-						state <= PHASE_TWO_READ;
-						delay_tmp <= 0;
-					end
-				end 
+			FINAL_PHASE : begin
+				if (count < NUM_SHA256) begin
+					cur_write_data <= final_out_h0[phase_iter*NUM_SHA256 + count];
+					cur_addr <= output_addr + phase_iter*NUM_SHA256 + count;
+					state <= FINAL_PHASE;
+					count <= count + 1;
+				end
 				else begin
-					state <= IDLE;
-					cur_we <= 0;
+					phase_iter <= phase_iter + 1;
+					cur_we <= 1;
+					delay_tmp <= 0;
+					if ((phase_iter+1)*NUM_SHA256 < num_nonces)
+						state <= PHASE_TWO_READ;
+					else begin
+						state <= IDLE;
+						cur_we <= 0;
+					end
 				end
 			end
 			
