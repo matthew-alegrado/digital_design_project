@@ -6,6 +6,7 @@ module bitcoin_hash (input logic        clk, reset_n, start,
                      input logic [31:0] mem_read_data);
 
 parameter num_nonces = 16;
+parameter NUM_SHA256 = 8;
 
 enum logic [2:0] {IDLE, INIT_READ, PHASE_ONE_READ, PHASE_ONE_CALCULATE, PHASE_TWO_READ, PHASE_TWO_CALCULATE, PHASE_THREE, FINAL_PHASE} state;
 
@@ -35,16 +36,16 @@ parameter int starting_hash[8] = '{
 // Student to add rest of the code here
 
 logic [31:0] message[20];
-logic [31:0] sha256_in[16]; 
+logic [31:0] sha256_in[NUM_SHA256][16]; 
 logic [31:0] sha256_hash[8]; 
-logic [31:0] sha256_out[8];
+logic [31:0] sha256_out[NUM_SHA256][8];
 logic [31:0] cur_write_data;
 logic [7:0] count, phase_iter;
 logic delay_tmp;
 logic [15:0] cur_addr;
-logic start_sha256;
-logic sha256_done;
-logic [31:0] final_out_h0[num_nonces];
+logic start_sha256, start_sha256_parallel;
+logic sha256_done[NUM_SHA256];
+logic [31:0] final_out_h0[num_nonces], temp_out_h0[NUM_SHA256];
 logic [31:0] phase_two_hash[8];
 logic cur_we;
 
@@ -59,9 +60,12 @@ always_ff @(posedge clk, negedge reset_n) begin
 		count <= 0;
 		phase_iter <= 0;
 		start_sha256 <= 0;
+		start_sha256_parallel <= 0;
 		cur_we <= 0;
-		for (int i = 0; i < 16; i++) begin
-			sha256_in[i] <= 0;
+		for (int j = 0; j < NUM_SHA256; j++) begin
+			for (int i = 0; i < 16; i++) begin
+				sha256_in[j][i] <= 0;
+			end
 		end
 		for (int i = 0; i < 8; i++) begin
 			sha256_hash[i] <= 0;
@@ -98,7 +102,7 @@ always_ff @(posedge clk, negedge reset_n) begin
 		
 			PHASE_ONE_READ : begin // This reads w[0] to w[15] into sha256_in vector, which is loaded into sha256 inst
 				for (int i = 0; i < 16; i++) begin
-					sha256_in[i] <= message[i];
+					sha256_in[0][i] <= message[i];
 				end
 				for (int i = 0; i < 8; i++) begin
 					sha256_hash[i] <= starting_hash[i];
@@ -109,7 +113,7 @@ always_ff @(posedge clk, negedge reset_n) begin
 			
 			PHASE_ONE_CALCULATE : begin
 				if (!delay_tmp && !start_sha256) begin
-					start_sha256 <= 1;
+					start_sha256 <= 1;					
 					state <= PHASE_ONE_CALCULATE;
 				end
 				else if (!delay_tmp) begin
@@ -120,9 +124,11 @@ always_ff @(posedge clk, negedge reset_n) begin
 					start_sha256 <= 0;
 					state <= PHASE_ONE_CALCULATE;
 				end
-				else if (!sha256_done) state <= PHASE_ONE_CALCULATE;
+				else if (!sha256_done[0]) state <= PHASE_ONE_CALCULATE;
 				else begin
-					phase_two_hash <= sha256_out; // writes phase 1 out to hash of phase 2
+					for (int i = 0; i < 8; i++) begin
+						phase_two_hash[i] <= sha256_out[0][i];
+					end
 					state <= PHASE_TWO_READ;
 					delay_tmp <= 0;
 				end
@@ -130,21 +136,24 @@ always_ff @(posedge clk, negedge reset_n) begin
 				
 			PHASE_TWO_READ : begin // handles inputs to phase 2 sha256
 				sha256_hash <= phase_two_hash;
-				for (int i = 0; i < 3; i++) begin
-					sha256_in[i] <= message[i + 16];
+				for (int j = 0; j < NUM_SHA256; j++) begin
+					for (int i = 0; i < 3; i++) begin
+						sha256_in[j][i] <= message[i + 16];
+					end
+					for (int i = 5; i < 15; i++) begin // padding
+						sha256_in[j][i] <= 0;
+					end
+					sha256_in[j][3] <= phase_iter*NUM_SHA256 + j; // nonce increment
+					sha256_in[j][4] <= 32'h80000000;
+					sha256_in[j][15] <= 32'd640; // message length
+					state <= PHASE_TWO_CALCULATE;	
 				end
-				for (int i = 5; i < 15; i++) begin // padding
-					sha256_in[i] <= 0;
-				end
-				sha256_in[3] <= phase_iter; // nonce increments by 1 each cycle	
-				sha256_in[4] <= 32'h80000000;
-				sha256_in[15] <= 32'd640; // message length
-				state <= PHASE_TWO_CALCULATE;		
 			end
 			
 			PHASE_TWO_CALCULATE : begin
 				if (!start_sha256 && !delay_tmp) begin
 					start_sha256 <= 1;
+					start_sha256_parallel <= 1;
 					state <= PHASE_TWO_CALCULATE;
 				end
 				else if (!delay_tmp) begin
@@ -153,18 +162,21 @@ always_ff @(posedge clk, negedge reset_n) begin
 				end
 				else if (start_sha256) begin
 					start_sha256 <= 0;
+					start_sha256_parallel <= 0;
 					state <= PHASE_TWO_CALCULATE;
 				end
-				else if (sha256_done) begin
-					for (int i = 0; i < 8; i++) begin // write phase 2 out into input of phase 3 [0 to 7]
-						sha256_in[i] <= sha256_out[i];
-						sha256_hash[i] <= starting_hash[i];
+				else if (sha256_done[0] && sha256_done[NUM_SHA256 - 1]) begin
+					for (int j = 0; j < NUM_SHA256; j++) begin
+						for (int i = 0; i < 8; i++) begin // write phase 2 out into input of phase 3 [0 to 7]
+							sha256_in[j][i] <= sha256_out[j][i];
+							sha256_hash[i] <= starting_hash[i];
+						end
+						for (int i = 9; i < 15; i++) begin // phase 3 in [8 to 15] are 0s
+							sha256_in[j][i] <= 0;
+						end
+						sha256_in[j][8] <= 32'h80000000;
+						sha256_in[j][15] <= 32'd256;				
 					end
-					for (int i = 9; i < 15; i++) begin // phase 3 in [8 to 15] are 0s
-						sha256_in[i] <= 0;
-					end
-					sha256_in[8] <= 32'h80000000;
-					sha256_in[15] <= 32'd256;			
 					delay_tmp <= 0;
 					state <= PHASE_THREE;
 				end
@@ -178,6 +190,7 @@ always_ff @(posedge clk, negedge reset_n) begin
 				// At the end, write h0 from each iteration to memory
 				if (!start_sha256 && !delay_tmp) begin
 					start_sha256 <= 1;
+					start_sha256_parallel <= 1;
 					state <= PHASE_THREE;
 				end
 				else if (!delay_tmp) begin
@@ -186,11 +199,17 @@ always_ff @(posedge clk, negedge reset_n) begin
 				end
 				else if (start_sha256) begin
 					start_sha256 <= 0;
+					start_sha256_parallel <= 0;
 					state <= PHASE_THREE;
 				end 
-				else if (sha256_done && delay_tmp) begin
-					final_out_h0[phase_iter] <= sha256_out[0];
+				else if (sha256_done[0] && sha256_done[NUM_SHA256 - 1] && delay_tmp) begin
+					for (int j = 0; j < NUM_SHA256; j++) begin
+						final_out_h0[phase_iter*NUM_SHA256 + j] <= sha256_out[j][0];						
+					end
 					state <= FINAL_PHASE;
+					count <= 0;
+					delay_tmp <= 0;
+					cur_we <= 1;
 				end
 				else begin 
 					state <= PHASE_THREE;
@@ -199,13 +218,24 @@ always_ff @(posedge clk, negedge reset_n) begin
 			end
 			
 			FINAL_PHASE : begin	
-				if (phase_iter < num_nonces) begin
-					cur_write_data <= final_out_h0[phase_iter];
-					cur_addr <= output_addr + phase_iter;
-					phase_iter <= phase_iter + 1;
-					cur_we <= 1;
-					state <= PHASE_TWO_READ;
-					delay_tmp <= 0;
+				if (phase_iter*NUM_SHA256 < num_nonces) begin
+					if (!delay_tmp) begin
+						state <= FINAL_PHASE;
+						cur_we <= 1;
+						delay_tmp <= 1;
+					end
+					else if (count < NUM_SHA256) begin
+						cur_write_data <= final_out_h0[phase_iter*NUM_SHA256 + count];
+						cur_addr <= output_addr + phase_iter*NUM_SHA256 + count;
+						state <= FINAL_PHASE;
+						count <= count + 1;
+					end
+					else begin
+						phase_iter <= phase_iter + 1;
+						cur_we <= 1;
+						state <= PHASE_TWO_READ;
+						delay_tmp <= 0;
+					end
 				end 
 				else begin
 					state <= IDLE;
@@ -222,16 +252,33 @@ end
 	
 assign done = (state == IDLE);
 
-simplified_sha256_part2 sha_256_inst ( // changed the sha256 file name to include _part2 for clarity
+simplified_sha256_part2 sha_256_inst_1 ( // changed the sha256 file name to include _part2 for clarity
 		.clk(clk),
 		.reset_n(reset_n),
 		.start(start_sha256),
-		.done(sha256_done),
+		.done(sha256_done[0]),
 
-		.mem_write_data(sha256_out), // writes out in parallel
-		.mem_read_data(sha256_in), // reads in a vector in parallel
+		.mem_write_data(sha256_out[0]), // writes out in parallel
+		.mem_read_data(sha256_in[0]), // reads in a vector in parallel
 		.hash(sha256_hash)
 	);
+	
+genvar t;	
+generate
+	// this will generate all of the other sha256 modules besides the first one
+	for (t = 1; t < NUM_SHA256; t++) begin : sha256_gen
+		simplified_sha256_part2 sha_256_inst (
+			.clk(clk),
+			.reset_n(reset_n),
+			.start(start_sha256_parallel),
+			.done(sha256_done[t]),
+	
+			.mem_write_data(sha256_out[t]), // writes out in parallel
+			.mem_read_data(sha256_in[t]), 
+			.hash(sha256_hash)
+		);
+	end
 
+endgenerate
 
 endmodule
